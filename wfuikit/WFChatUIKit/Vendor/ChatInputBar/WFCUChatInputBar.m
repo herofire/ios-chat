@@ -20,6 +20,7 @@
 #import "UIView+Toast.h"
 #import <WFChatClient/WFCChatClient.h>
 #import "WFCUMentionUserTableViewController.h"
+#import "WFCUContactListViewController.h"
 
 
 #define CHAT_INPUT_BAR_PADDING 8
@@ -52,6 +53,8 @@
 @property (nonatomic, strong)UIButton *pluginSwitchBtn;
 
 @property (nonatomic, strong)UITextView *textInputView;
+@property (nonatomic, strong)UIView *inputCoverView;
+
 @property (nonatomic, strong)UIButton *voiceInputBtn;
 
 @property (nonatomic, strong)UIView *emojInputView;
@@ -73,6 +76,8 @@
 @property (nonatomic, strong)WFCCConversation *conversation;
 
 @property (nonatomic, assign)double lastTypingTime;
+
+@property (nonatomic, strong)UIColor *textInputViewTintColor;
 @end
 
 @implementation WFCUChatInputBar
@@ -135,7 +140,16 @@
     self.textInputView.layer.masksToBounds = YES;
     self.textInputView.layer.borderWidth = 0.5f;
     self.textInputView.layer.borderColor = HEXCOLOR(0xdbdbdd).CGColor;
+    self.textInputView.userInteractionEnabled = YES;
     [self addSubview:self.textInputView];
+    
+    self.inputCoverView = [[UIView alloc] initWithFrame:self.textInputView.bounds];
+    self.inputCoverView.backgroundColor = [UIColor clearColor];
+    [self.textInputView addSubview:self.inputCoverView];
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onTapInputView:)];
+        tap.numberOfTapsRequired = 1;
+        [self.inputCoverView addGestureRecognizer:tap];
+    
     
     self.voiceInputBtn = [[UIButton alloc] initWithFrame:CGRectMake(CHAT_INPUT_BAR_HEIGHT, CHAT_INPUT_BAR_PADDING, parentRect.size.width - CHAT_INPUT_BAR_HEIGHT - CHAT_INPUT_BAR_HEIGHT - CHAT_INPUT_BAR_HEIGHT + CHAT_INPUT_BAR_PADDING, CHAT_INPUT_BAR_ICON_SIZE)];
     [self.voiceInputBtn setTitle:@"按下 说话" forState:UIControlStateNormal];
@@ -162,6 +176,11 @@
     self.voiceInputBtn.hidden = YES;
     self.textInputView.returnKeyType = UIReturnKeySend;
     self.textInputView.delegate = self;
+}
+
+- (void)onTapInputView:(id)sender {
+    NSLog(@"on tap input view");
+    self.inputBarStatus = ChatInputBarKeyboardStatus;
 }
 
 - (void)onTouchDown:(id)sender {
@@ -336,7 +355,7 @@
 }
 
 - (void)resetInputBarStatue {
-    if (self.inputBarStatus != ChatInputBarRecordStatus) {
+    if (self.inputBarStatus != ChatInputBarRecordStatus && self.inputBarStatus != ChatInputBarMuteStatus) {
         self.inputBarStatus = ChatInputBarDefaultStatus;
     }
 }
@@ -364,6 +383,17 @@
 }
 
 - (void)setInputBarStatus:(ChatInputBarStatus)inputBarStatus {
+    if (inputBarStatus == _inputBarStatus) {
+        return;
+    }
+    if (_inputBarStatus == ChatInputBarMuteStatus) {
+        [self.textInputView setUserInteractionEnabled:YES];
+        [self.voiceInputBtn setEnabled:YES];
+        [self.voiceSwitchBtn setEnabled:YES];
+        [self.emojSwitchBtn setEnabled:YES];
+        [self.pluginSwitchBtn setEnabled:YES];
+    }
+    
     _inputBarStatus = inputBarStatus;
     switch (inputBarStatus) {
         case ChatInputBarKeyboardStatus:
@@ -403,8 +433,29 @@
             self.textInput = YES;
             [self.textInputView resignFirstResponder];
             break;
+        case ChatInputBarMuteStatus:
+            self.voiceInput = NO;
+            self.emojInput = NO;
+            self.pluginInput = NO;
+            self.textInput = YES;
+            [self.textInputView setUserInteractionEnabled:NO];
+            [self.voiceInputBtn setEnabled:NO];
+            [self.voiceSwitchBtn setEnabled:NO];
+            [self.emojSwitchBtn setEnabled:NO];
+            [self.pluginSwitchBtn setEnabled:NO];
+            break;
         default:
             break;
+    }
+    if (inputBarStatus != ChatInputBarKeyboardStatus) {
+        if (self.textInputView.tintColor != [UIColor clearColor]) {
+            self.textInputViewTintColor = self.textInputView.tintColor;
+        }
+        self.textInputView.tintColor = [UIColor clearColor];
+        self.inputCoverView.hidden = NO;
+    } else {
+        self.textInputView.tintColor = self.textInputViewTintColor;
+        self.inputCoverView.hidden = YES;
     }
 }
 
@@ -588,7 +639,19 @@
 - (BOOL)appendMention:(NSString *)userId name:(NSString *)userName {
     if (self.conversation.type == Group_Type) {
         NSString *mentionText = [NSString stringWithFormat:@"@%@ ", userName];
-        [self didMentionType:1 user:userId range:NSMakeRange(self.textInputView.selectedRange.location, mentionText.length) text:mentionText];
+        BOOL needDelay = NO;
+        if(self.inputBarStatus == ChatInputBarDefaultStatus || self.inputBarStatus == ChatInputBarPluginStatus || self.inputBarStatus == ChatInputBarRecordStatus) {
+            self.inputBarStatus = ChatInputBarKeyboardStatus;
+            needDelay = YES;
+        }
+        if (needDelay) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self didMentionType:1 user:userId range:NSMakeRange(self.textInputView.selectedRange.location, mentionText.length) text:mentionText];
+            });
+        } else {
+            [self didMentionType:1 user:userId range:NSMakeRange(self.textInputView.selectedRange.location, mentionText.length) text:mentionText];
+        }
+        
         return YES;
     } else {
         return NO;
@@ -677,13 +740,39 @@
     BOOL needUpdateText = NO;
     if(self.conversation.type == Group_Type) {
         if ([text isEqualToString:@"@"]) {
-            WFCUMentionUserTableViewController *mvc = [[WFCUMentionUserTableViewController alloc] init];
-            mvc.groupId = self.conversation.target;
-            mvc.delegate = self;
-            mvc.range = range;
             
-            UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:mvc];
-            [[self.delegate requireNavi] presentViewController:nav animated:YES completion:nil];
+            WFCUContactListViewController *pvc = [[WFCUContactListViewController alloc] init];
+            pvc.selectContact = YES;
+            pvc.multiSelect = NO;
+            NSMutableArray *disabledUser = [[NSMutableArray alloc] init];
+            [disabledUser addObject:[WFCCNetworkService sharedInstance].userId];
+            pvc.disableUsers = disabledUser;
+            NSMutableArray *candidateUser = [[NSMutableArray alloc] init];
+            NSArray<WFCCGroupMember *> *members = [[WFCCIMService sharedWFCIMService] getGroupMembers:self.conversation.target forceUpdate:NO];
+            for (WFCCGroupMember *member in members) {
+                [candidateUser addObject:member.memberId];
+            }
+            pvc.candidateUsers = candidateUser;
+            pvc.withoutCheckBox = YES;
+            __weak typeof(self)ws = self;
+            pvc.selectResult = ^(NSArray<NSString *> *contacts) {
+                if (contacts.count == 1) {
+                    WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:[contacts objectAtIndex:0] inGroup:self.conversation.target refresh:NO];
+                    NSString *name = userInfo.displayName;
+                    if (userInfo.groupAlias.length) {
+                        name = userInfo.groupAlias;
+                    }
+                    
+                    NSString *text = [NSString stringWithFormat:@"@%@ ", name];
+                    [ws didMentionType:1 user:[contacts objectAtIndex:0] range:NSMakeRange(range.location, text.length) text:text];
+                } else {
+                    [ws didCancelMentionAtRange:range];
+                }
+            };
+            pvc.disableUsersSelected = YES;
+            
+            UINavigationController *navi = [[UINavigationController alloc] initWithRootViewController:pvc];
+            [[self.delegate requireNavi] presentViewController:navi animated:YES completion:nil];
             return NO;
         }
         
@@ -753,6 +842,7 @@
     __weak typeof(self)ws = self;
     [UIView animateWithDuration:duration animations:^{
         ws.textInputView.frame = tvFrame;
+        ws.inputCoverView.frame = ws.textInputView.bounds;
         self.frame = baseFrame;
         self.voiceSwitchBtn.frame = voiceFrame;
         self.emojSwitchBtn.frame = emojFrame;
@@ -795,6 +885,16 @@
     }
 }
 
+- (BOOL)textViewShouldBeginEditing:(UITextView *)textView {
+    if (self.inputBarStatus == ChatInputBarDefaultStatus) {
+        self.inputBarStatus = ChatInputBarKeyboardStatus;
+    }
+    return YES;
+}
+
+- (BOOL)textViewShouldEndEditing:(UITextView *)textView {
+    return YES;
+}
 #pragma mark - PluginBoardViewDelegate
 - (void)onItemClicked:(NSUInteger)itemTag {
     UINavigationController *navi = [self.delegate requireNavi];
@@ -929,7 +1029,8 @@
     
     [self.textInputView.textStorage
      insertAttributedString:attStr  atIndex:range.location];
-    
+    range.location += range.length;
+    range.length = 0;
     self.textInputView.selectedRange = range;
 }
 
@@ -937,5 +1038,9 @@
     [self.textInputView.textStorage replaceCharactersInRange:NSMakeRange(range.location, 0) withString:@"@"];
     
     self.textInputView.selectedRange = range;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 @end

@@ -24,6 +24,10 @@
         [dataDict setObject:self.owner forKey:@"m"];
     }
     
+    if (self.groupId) {
+        [dataDict setObject:self.groupId forKey:@"g"];
+    }
+    
     
     payload.binaryContent = [NSJSONSerialization dataWithJSONObject:dataDict
                                                             options:kNilOptions
@@ -40,6 +44,7 @@
     if (!__error) {
         self.operateUser = dictionary[@"o"];
         self.owner = dictionary[@"m"];
+        self.groupId = dictionary[@"g"];
     }
 }
 
@@ -57,22 +62,30 @@
     [[WFCCIMService sharedWFCIMService] registerMessageContent:self];
 }
 
-- (NSString *)digest {
-    return [self formatNotification];
+- (NSString *)digest:(WFCCMessage *)message {
+    return [self formatNotification:message];
 }
 
-- (NSString *)formatNotification {
+- (NSString *)formatNotification:(WFCCMessage *)message {
     NSString *formatMsg;
     if ([[WFCCNetworkService sharedInstance].userId isEqualToString:self.operateUser]) {
-        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.owner refresh:NO];
-        if (userInfo.displayName.length > 0) {
+        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.owner inGroup:self.groupId refresh:NO];
+        if (userInfo.friendAlias.length > 0) {
+            formatMsg = [NSString stringWithFormat:@"你把群主转让给了%@", userInfo.friendAlias];
+        } else if(userInfo.groupAlias.length > 0) {
+            formatMsg = [NSString stringWithFormat:@"你把群主转让给了%@", userInfo.groupAlias];
+        } else if (userInfo.displayName.length > 0) {
             formatMsg = [NSString stringWithFormat:@"你把群主转让给了%@", userInfo.displayName];
         } else {
             formatMsg = [NSString stringWithFormat:@"你把群主转让给了%@", self.owner];
         }
     } else {
-        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.operateUser refresh:NO];
-        if (userInfo.displayName.length > 0) {
+        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.operateUser inGroup:self.groupId refresh:NO];
+        if (userInfo.friendAlias.length > 0) {
+            formatMsg = [NSString stringWithFormat:@"%@把群主转让给了", userInfo.friendAlias];
+        } else if(userInfo.groupAlias.length > 0) {
+            formatMsg = [NSString stringWithFormat:@"%@把群主转让给了", userInfo.groupAlias];
+        } else if (userInfo.displayName.length > 0) {
             formatMsg = [NSString stringWithFormat:@"%@把群主转让给了", userInfo.displayName];
         } else {
             formatMsg = [NSString stringWithFormat:@"%@把群主转让给了", self.operateUser];
@@ -81,8 +94,12 @@
         if ([[WFCCNetworkService sharedInstance].userId isEqualToString:self.owner]) {
             formatMsg = [formatMsg stringByAppendingString:@"你"];
         } else {
-            userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.owner refresh:NO];
-            if (userInfo.displayName.length > 0) {
+            userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:self.owner inGroup:self.groupId refresh:NO];
+            if (userInfo.friendAlias.length > 0) {
+                formatMsg = [formatMsg stringByAppendingString:userInfo.friendAlias];
+            } else if(userInfo.groupAlias.length > 0) {
+                formatMsg = [formatMsg stringByAppendingString:userInfo.groupAlias];
+            } else if (userInfo.displayName.length > 0) {
                 formatMsg = [formatMsg stringByAppendingString:userInfo.displayName];
             } else {
                 formatMsg = [formatMsg stringByAppendingString:self.owner];

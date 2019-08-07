@@ -30,7 +30,7 @@
 #import "QQLBXScanViewController.h"
 #import "StyleDIY.h"
 #import "GroupInfoViewController.h"
-//#import <Bugly/Bugly.h>
+#import <Bugly/Bugly.h>
 
 @interface AppDelegate () <ConnectionStatusDelegate, ReceiveMessageDelegate,
 #if WFCU_SUPPORT_VOIP
@@ -42,8 +42,8 @@
 
 @implementation AppDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-//    //替换为您自己的Bugly账户。
-//    [Bugly startWithAppId:@"b21375e023"];
+    //替换为您自己的Bugly账户。
+    [Bugly startWithAppId:@"b21375e023"];
     
     [WFCCNetworkService startLog];
     [WFCCNetworkService sharedInstance].connectionStatusDelegate = self;
@@ -131,7 +131,7 @@
 - (void)applicationDidEnterBackground:(UIApplication *)application {
     // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
     // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
-    WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0), @(1)]];
+    WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0)]];
     [UIApplication sharedApplication].applicationIconBadgeNumber = unreadCount.unread;
 }
 
@@ -153,7 +153,7 @@
 
 - (void)onReceiveMessage:(NSArray<WFCCMessage *> *)messages hasMore:(BOOL)hasMore {
     if ([UIApplication sharedApplication].applicationState == UIApplicationStateBackground) {
-        WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0), @(1)]];
+        WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0)]];
         int count = unreadCount.unread;
         [UIApplication sharedApplication].applicationIconBadgeNumber = count;
         
@@ -168,12 +168,12 @@
             if((flag & 0x03) && !info.isSilent && ![msg.content isKindOfClass:[WFCCCallStartMessageContent class]]) {
               UILocalNotification *localNote = [[UILocalNotification alloc] init];
               
-              localNote.alertBody = [msg.content digest];
+              localNote.alertBody = [msg digest];
               if (msg.conversation.type == Single_Type) {
                 WFCCUserInfo *sender = [[WFCCIMService sharedWFCIMService] getUserInfo:msg.conversation.target refresh:NO];
-                if (sender.name) {
+                if (sender.displayName) {
                     if (@available(iOS 8.2, *)) {
-                        localNote.alertTitle = sender.name;
+                        localNote.alertTitle = sender.displayName;
                     } else {
                         // Fallback on earlier versions
                     }
@@ -181,15 +181,15 @@
               } else if(msg.conversation.type == Group_Type) {
                   WFCCGroupInfo *group = [[WFCCIMService sharedWFCIMService] getGroupInfo:msg.conversation.target refresh:NO];
                   WFCCUserInfo *sender = [[WFCCIMService sharedWFCIMService] getUserInfo:msg.fromUser refresh:NO];
-                  if (sender.name && group.name) {
+                  if (sender.displayName && group.name) {
                       if (@available(iOS 8.2, *)) {
-                          localNote.alertTitle = [NSString stringWithFormat:@"%@@%@:", sender.name, group.name];
+                          localNote.alertTitle = [NSString stringWithFormat:@"%@@%@:", sender.displayName, group.name];
                       } else {
                           // Fallback on earlier versions
                       }
-                  }else if (sender.name) {
+                  }else if (sender.displayName) {
                       if (@available(iOS 8.2, *)) {
-                          localNote.alertTitle = sender.name;
+                          localNote.alertTitle = sender.displayName;
                       } else {
                           // Fallback on earlier versions
                       }
@@ -210,7 +210,9 @@
 
 - (void)onConnectionStatusChanged:(ConnectionStatus)status {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (status == kConnectionStatusLogout) {
+        if (status == kConnectionStatusRejected || status == kConnectionStatusTokenIncorrect || status == kConnectionStatusSecretKeyMismatch) {
+            [[WFCCNetworkService sharedInstance] disconnect:YES];
+        } else if (status == kConnectionStatusLogout) {
             UIViewController *loginVC = [[WFCLoginViewController alloc] init];
             self.window.rootViewController = loginVC;
         } 
@@ -235,12 +237,9 @@
     if ([str rangeOfString:@"wildfirechat://user" options:NSCaseInsensitiveSearch].location == 0) {
         NSString *userId = [str lastPathComponent];
         WFCUProfileTableViewController *vc2 = [[WFCUProfileTableViewController alloc] init];
-        vc2.userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:userId refresh:NO];
-        if (vc2.userInfo == nil) {
-            return NO;
-        }
-        
+        vc2.userId = userId;
         vc2.hidesBottomBarWhenPushed = YES;
+        
         [navigator pushViewController:vc2 animated:YES];
         return YES;
     } else if ([str rangeOfString:@"wildfirechat://group" options:NSCaseInsensitiveSearch].location == 0) {
@@ -272,9 +271,9 @@
         localNote.alertBody = @"来电话了";
         
             WFCCUserInfo *sender = [[WFCCIMService sharedWFCIMService] getUserInfo:session.clientId refresh:NO];
-            if (sender.name) {
+            if (sender.displayName) {
                 if (@available(iOS 8.2, *)) {
-                    localNote.alertTitle = sender.name;
+                    localNote.alertTitle = sender.displayName;
                 } else {
                     // Fallback on earlier versions
                     
@@ -361,16 +360,8 @@ void systemAudioCallback (SystemSoundID soundID, void* clientData) {
 #pragma mark - QrCodeDelegate
 - (void)showQrCodeViewController:(UINavigationController *)navigator type:(int)type target:(NSString *)target {
     CreateBarCodeViewController *vc = [CreateBarCodeViewController new];
-    if (type == QRType_Me) {
-        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:[WFCCNetworkService sharedInstance].userId refresh:NO];
-        vc.str = [NSString stringWithFormat:@"wildfirechat://user/%@", userInfo.userId];
-        vc.logoUrl = userInfo.portrait;
-    } else if(type == QRType_Group) {
-        WFCCGroupInfo *groupInfo = [[WFCCIMService sharedWFCIMService] getGroupInfo:target refresh:NO];
-        vc.str = [NSString stringWithFormat:@"wildfirechat://group/%@", target];
-        vc.logoUrl = groupInfo.portrait;
-    }
-    
+    vc.qrType = type;
+    vc.target = target;
     [navigator pushViewController:vc animated:YES];
 }
 

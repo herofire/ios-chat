@@ -9,7 +9,7 @@
 #import "WFCUContactListViewController.h"
 #import <WFChatClient/WFCChatClient.h>
 #import "SDWebImage.h"
-#import "WFCUMessageListViewController.h"
+#import "WFCUProfileTableViewController.h"
 #import "WFCUContactSelectTableViewCell.h"
 #import "WFCUContactTableViewCell.h"
 #import "pinyin.h"
@@ -34,6 +34,9 @@
 
 @property(nonatomic, strong) NSDictionary *allFriendSectionDic;
 @property(nonatomic, strong) NSArray *allKeys;
+
+@property(nonatomic, assign)BOOL sorting;
+@property(nonatomic, assign)BOOL needSort;
 @end
 
 @implementation WFCUContactListViewController
@@ -65,6 +68,7 @@
 - (void)setup {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onFriendRequestUpdated:) name:kFriendRequestUpdated object:nil];
 }
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     // Do any additional setup after loading the view.
@@ -170,18 +174,20 @@
     } else {
         userIdList = [[WFCCIMService sharedWFCIMService] getMyFriendList:forceLoadFromRemote];
     }
-    for (NSString *userId in userIdList) {
-        WFCCUserInfo *userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:userId refresh:NO];
-        if (userInfo == nil) {
-            userInfo = [[WFCCUserInfo alloc] init];
-            userInfo.userId = userId;
-            userInfo.displayName = [NSString stringWithFormat:@"User<%@>", userId];
+    self.dataArray = [[WFCCIMService sharedWFCIMService] getUserInfos:userIdList inGroup:nil];
+    self.needSort = YES;
+}
+
+- (void)setNeedSort:(BOOL)needSort {
+    _needSort = needSort;
+    if (needSort && !self.sorting) {
+        _needSort = NO;
+        if (self.searchController.active) {
+            [self sortAndRefreshWithList:self.searchList];
+        } else {
+            [self sortAndRefreshWithList:self.dataArray];
         }
-        
-        [self.dataArray addObject:userInfo];
     }
-    
-    [self sortAndRefreshWithList:self.dataArray];
 }
 
 - (void)onUserInfoUpdated:(NSNotification *)notification {
@@ -195,8 +201,7 @@
         }
     }
     if(needRefresh) {
-        [self sortAndRefreshWithList:self.dataArray];
-        [self.tableView reloadData];
+        self.needSort = needRefresh;
     }
 }
 - (void)onContactsUpdated:(NSNotification *)notification {
@@ -204,6 +209,7 @@
 }
 
 - (void)sortAndRefreshWithList:(NSArray *)friendList {
+    self.sorting = YES;
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         self.resultDic = [WFCUContactListViewController sortedArrayWithPinYinDic:friendList];
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -227,6 +233,10 @@
           }
             
             [self.tableView reloadData];
+            self.sorting = NO;
+            if (self.needSort) {
+                self.needSort = self.needSort;
+            }
         });
     });
 }
@@ -251,6 +261,7 @@
     int count = [[WFCCIMService sharedWFCIMService] getUnreadFriendRequestStatus];
     [self.tabBarController.tabBar showBadgeOnItemIndex:1 badgeValue:count];
 }
+
 
 #pragma mark - UITableViewDataSource
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -345,7 +356,7 @@
         selectCell.friendUid = userInfo.userId;
         selectCell.multiSelect = self.multiSelect;
         
-        if (self.multiSelect) {
+        if (self.multiSelect && !self.withoutCheckBox) {
             if ([self.selectedContacts containsObject:userInfo.userId]) {
                 selectCell.checked = YES;
             } else {
@@ -361,7 +372,16 @@
             } else {
                 selectCell.disabled = NO;
             }
+        } else {
+            WFCUContactTableViewCell *selectCell = [tableView dequeueReusableCellWithIdentifier:REUSEIDENTIFY];
+            if (selectCell == nil) {
+                selectCell = [[WFCUContactTableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:REUSEIDENTIFY];
+            }
+            
+            WFCCUserInfo *userInfo = dataSource[indexPath.row];
+            selectCell.userId = userInfo.userId;
         }
+
         cell = selectCell;
     } else {
 #define REUSEIDENTIFY @"resueCell"
@@ -395,6 +415,9 @@
             contactCell.userId = userInfo.userId;
             cell = contactCell;
         }
+    }
+    if (cell == nil) {
+        NSLog(@"error");
     }
     return cell;
 }
@@ -543,11 +566,13 @@
             [self left:nil];
         }
     } else {
-            WFCUMessageListViewController *mvc = [[WFCUMessageListViewController alloc] init];
-            WFCCUserInfo *friend = dataSource[indexPath.row];
-            mvc.conversation = [WFCCConversation conversationWithType:Single_Type target:friend.userId line:0];
-            mvc.hidesBottomBarWhenPushed = YES;
-            [self.navigationController pushViewController:mvc animated:YES];
+        WFCUProfileTableViewController *vc = [[WFCUProfileTableViewController alloc] init];
+        WFCCUserInfo *friend = dataSource[indexPath.row];
+        vc.userId = friend.userId;
+
+        vc.hidesBottomBarWhenPushed = YES;
+        
+        [self.navigationController pushViewController:vc animated:YES];
     }
 }
 
@@ -566,23 +591,22 @@
 }
 
 - (void)didDismissSearchController:(UISearchController *)searchController {
-    [self loadContact:NO];
-    [self.tableView reloadData];
+    self.needSort = YES;
 }
 
 -(void)updateSearchResultsForSearchController:(UISearchController *)searchController {
-    NSString *searchString = [self.searchController.searchBar text];
-    if (self.searchList!= nil) {
-        [self.searchList removeAllObjects];
-        for (WFCCUserInfo *friend in self.dataArray) {
-            if ([friend.displayName containsString:searchString]) {
-                [self.searchList addObject:friend];
+    if (searchController.active) {
+        NSString *searchString = [self.searchController.searchBar text];
+        if (self.searchList!= nil) {
+            [self.searchList removeAllObjects];
+            for (WFCCUserInfo *friend in self.dataArray) {
+                if ([friend.displayName containsString:searchString]) {
+                    [self.searchList addObject:friend];
+                }
             }
         }
+        self.needSort = YES;
     }
-    
-    [self sortAndRefreshWithList:self.searchList];
-    [self.tableView reloadData];
 }
 
 + (NSMutableDictionary *)sortedArrayWithPinYinDic:(NSArray *)userList {
@@ -631,8 +655,17 @@
         for (id user in userList) {
             NSString *firstLetter;
 
-                WFCCUserInfo *userInfo = (WFCCUserInfo*)user;
-                firstLetter = [self getFirstUpperLetter:userInfo.displayName];
+            WFCCUserInfo *userInfo = (WFCCUserInfo*)user;
+            NSString *userName = userInfo.displayName;
+            if (userInfo.friendAlias.length) {
+                userName = userInfo.friendAlias;
+            }
+            if (userName.length == 0) {
+                userInfo.displayName = [NSString stringWithFormat:@"<%@>", userInfo.userId];
+                userName = userInfo.displayName;
+            }
+            
+            firstLetter = [self getFirstUpperLetter:userName];
             
         
             if ([firstLetter isEqualToString:key]) {
@@ -659,7 +692,10 @@
                          return [obj1 compare:obj2 options:NSNumericSearch];
                      }];
     NSMutableArray *allKeys = [[NSMutableArray alloc] initWithArray:keys];
-    
+    if ([allKeys containsObject:@"#"]) {
+        [allKeys removeObject:@"#"];
+        [allKeys insertObject:@"#" atIndex:allKeys.count];
+    }
     NSMutableDictionary *resultDic = [NSMutableDictionary new];
     [resultDic setObject:infoDic forKey:@"infoDic"];
     [resultDic setObject:allKeys forKey:@"allKeys"];
@@ -712,6 +748,10 @@
     NSString *match = @"(^[\u4e00-\u9fa5]+$)";
     NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF matches %@", match];
     return [predicate evaluateWithObject:text];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end

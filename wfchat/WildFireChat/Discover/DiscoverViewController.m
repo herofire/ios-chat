@@ -8,6 +8,8 @@
 
 #import "DiscoverViewController.h"
 #import "ChatroomListViewController.h"
+#import <WFChatUIKit/WFChatUIKit.h>
+#import <WFChatClient/WFCCIMService.h>
 
 @interface DiscoverViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong)UITableView *tableView;
@@ -17,7 +19,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"广场";
+    self.title = @"发现";
     
     self.tableView = [[UITableView alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, self.view.frame.size.height) style:UITableViewStyleGrouped];
     
@@ -44,6 +46,20 @@
         ChatroomListViewController *vc = [[ChatroomListViewController alloc] init];
         vc.hidesBottomBarWhenPushed = YES;
         [self.navigationController pushViewController:vc animated:YES];
+    } else if (indexPath.section == 0 && indexPath.row == 1) {
+        WFCUMessageListViewController *vc = [[WFCUMessageListViewController alloc] init];
+        
+        vc.conversation = [[WFCCConversation alloc] init];
+        vc.conversation.type = Single_Type;
+        vc.conversation.target = @"FireRobot";
+        vc.conversation.line = 0;
+        
+        vc.hidesBottomBarWhenPushed = YES;
+        [self.navigationController pushViewController:vc animated:YES];
+    } else if (indexPath.section == 0 && indexPath.row == 3) {
+        UIViewController *vc = [[NSClassFromString(@"SDTimeLineTableViewController") alloc] init];
+        vc.hidesBottomBarWhenPushed = YES;
+        [self.navigationController pushViewController:vc animated:YES];
     }
 }
 
@@ -52,10 +68,11 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) {
-        return 1;
+    if(NSClassFromString(@"SDTimeLineTableViewController")) {
+        return 4;
+    } else {
+        return 3;
     }
-    return 0;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -71,7 +88,16 @@
     if (indexPath.section == 0) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"聊天室";
-            cell.imageView.image = [UIImage imageNamed:@"chatroom"];
+            cell.imageView.image = [UIImage imageNamed:@"discover_chatroom"];
+        } else if (indexPath.row == 1) {
+            cell.textLabel.text = @"机器人";
+            cell.imageView.image = [UIImage imageNamed:@"discover_robot"];
+        } else if (indexPath.row == 2) {
+            cell.textLabel.text = @"频道";
+            cell.imageView.image = [UIImage imageNamed:@"discover_channel"];
+        } else if (indexPath.row == 3) {
+            cell.textLabel.text = @"朋友圈";
+            cell.imageView.image = [UIImage imageNamed:@"AlbumReflashIcon"];
         }
     }
     

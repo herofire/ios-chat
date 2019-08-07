@@ -55,7 +55,11 @@ typedef NS_ENUM(NSInteger, ModifyMyInfoType) {
 typedef NS_ENUM(NSInteger, ModifyGroupInfoType) {
     Modify_Group_Name = 0,
     Modify_Group_Portrait = 1,
-    Modify_Group_Extra = 2
+    Modify_Group_Extra = 2,
+    Modify_Group_Mute = 3,
+    Modify_Group_JoinType = 4,
+    Modify_Group_PrivateChat = 5,
+    Modify_Group_Searchable = 6
 };
 
 
@@ -94,6 +98,9 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
     UserSettingScope_My_Channel = 8,
     //不能直接使用，协议栈内会使用此值
     UserSettingScope_Listened_Channel = 9,
+    
+    //不能直接使用，协议栈内会使用此值
+    UserSettingScope_PC_Online = 10,
     
     
     //自定义用户设置，请使用1000以上的key
@@ -234,6 +241,9 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
  */
 - (void)clearUnreadStatus:(WFCCConversation *)conversation;
 
+- (void)clearUnreadStatus:(NSArray<NSNumber *> *)conversationTypes
+                              lines:(NSArray<NSNumber *> *)lines;
+
 /**
  清空所有会话的未读数
  */
@@ -259,6 +269,40 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
                                    from:(NSUInteger)fromIndex
                                   count:(NSInteger)count
                                withUser:(NSString *)user;
+
+/**
+ 获取某类会话信息
+ 
+ @param conversationTypes 会话类型
+ @param lines 默认传 @[@(0)]
+ @param contentTypes 消息类型
+ @param fromIndex 起始index
+ @param count 总数
+ @return 消息实体
+ */
+- (NSArray<WFCCMessage *> *)getMessages:(NSArray<NSNumber *> *)conversationTypes
+                                           lines:(NSArray<NSNumber *> *)lines
+                                    contentTypes:(NSArray<NSNumber *> *)contentTypes
+                                            from:(NSUInteger)fromIndex
+                                           count:(NSInteger)count
+                                        withUser:(NSString *)user;
+
+/**
+ 获取某类会话信息
+ 
+ @param conversationTypes 会话类型
+ @param lines 默认传 @[@(0)]
+ @param messageStatus 消息状态
+ @param fromIndex 起始index
+ @param count 总数
+ @return 消息实体
+ */
+- (NSArray<WFCCMessage *> *)getMessages:(NSArray<NSNumber *> *)conversationTypes
+                                           lines:(NSArray<NSNumber *> *)lines
+                                   messageStatus:(WFCCMessageStatus)messageStatus
+                                            from:(NSUInteger)fromIndex
+                                           count:(NSInteger)count
+                                        withUser:(NSString *)user;
 
 /**
  获取服务器消息
@@ -497,6 +541,26 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
                       refresh:(BOOL)refresh;
 
 /**
+ 获取用户信息
+ @discussion 获取用户信息，如果在群中有群昵称也一并返回
+ 
+ @param userId 用户ID
+ @param groupId 群组ID
+ @param refresh 是否强制从服务器更新，如果本地没有或者强制，会从服务器刷新，然后发出通知kUserInfoUpdated。
+ @return 本地的用户信息，可能为空
+ */
+- (WFCCUserInfo *)getUserInfo:(NSString *)userId inGroup:(NSString *)groupId refresh:(BOOL)refresh;
+
+/**
+ 批量获取用户信息
+ 
+ @param userIds 用户ID列表
+ @param groupId 群组ID
+ @return 本地的用户信息列表。本地不存在的用户会返回只有id的用户信息，同时会拉取。
+ */
+- (NSArray<WFCCUserInfo *> *)getUserInfos:(NSArray<NSString *> *)userIds inGroup:(NSString *)groupId;
+
+/**
  搜索用户
  
  @param keyword 关键词
@@ -607,6 +671,13 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
                   success:(void(^)(void))successBlock
                     error:(void(^)(int error_code))errorBlock;
 
+- (NSString *)getFriendAlias:(NSString *)friendId;
+
+- (void)setFriend:(NSString *)friendId
+            alias:(NSString *)alias
+          success:(void(^)(void))successBlock
+            error:(void(^)(int error_code))errorBlock;
+
 /**
  查询用户是否被加入黑名单
  
@@ -682,6 +753,7 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
 - (void)createGroup:(NSString *)groupId
                name:(NSString *)groupName
            portrait:(NSString *)groupPortrait
+               type:(WFCCGroupType)type
             members:(NSArray *)groupMembers
         notifyLines:(NSArray<NSNumber *> *)notifyLines
       notifyContent:(WFCCMessageContent *)notifyContent
@@ -805,6 +877,24 @@ typedef NS_ENUM(NSInteger, UserSettingScope) {
               success:(void(^)(void))successBlock
                 error:(void(^)(int error_code))errorBlock;
 
+/**
+ 设置群管理
+ 
+ @param groupId 群ID
+ @param isSet    设置或取消
+ @param memberId    成员ID
+ @param notifyLines 默认传 @[@(0)]
+ @param notifyContent 通知消息
+ @param successBlock 成功的回调
+ @param errorBlock 失败的回调
+ */
+- (void)setGroupManager:(NSString *)groupId
+                  isSet:(BOOL)isSet
+              memberIds:(NSArray<NSString *> *)memberId
+            notifyLines:(NSArray<NSNumber *> *)notifyLines
+          notifyContent:(WFCCMessageContent *)notifyContent
+                success:(void(^)(void))successBlock
+                  error:(void(^)(int error_code))errorBlock;
 /**
  获取当前用户收藏的群组
  

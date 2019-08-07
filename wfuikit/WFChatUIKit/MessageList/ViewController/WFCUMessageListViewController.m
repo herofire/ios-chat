@@ -26,7 +26,7 @@
 
 #import "WFCUChatInputBar.h"
 
-
+#import "UIView+Toast.h"
 
 #import "WFCUConversationSettingViewController.h"
 #import "SDPhotoBrowser.h"
@@ -40,7 +40,6 @@
 #import "MBProgressHUD.h"
 #import "WFCUMediaMessageDownloader.h"
 
-#import "VideoPlayerSampleViewController.h"
 #import "VideoPlayerKit.h"
 
 #import "WFCUForwardViewController.h"
@@ -117,18 +116,30 @@
     
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onMenuHidden:) name:UIMenuControllerDidHideMenuNotification object:nil];
     
+    __weak typeof(self) ws = self;
     
   if(self.conversation.type == Single_Type) {
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onUserInfoUpdated:) name:kUserInfoUpdated object:self.conversation.target];
-    
+      [[NSNotificationCenter defaultCenter] addObserverForName:kUserInfoUpdated object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+          if ([ws.conversation.target isEqualToString:note.object]) {
+              ws.targetUser = note.userInfo[@"userInfo"];
+          }
+      }];
+      
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"nav_chat_single"] style:UIBarButtonItemStyleDone target:self action:@selector(onRightBarBtn:)];
-    
   } else if(self.conversation.type == Group_Type) {
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onGroupInfoUpdated:) name:kGroupInfoUpdated object:self.conversation.target];
-    
+      [[NSNotificationCenter defaultCenter] addObserverForName:kGroupInfoUpdated object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+          if ([ws.conversation.target isEqualToString:note.object]) {
+              ws.targetGroup = note.userInfo[@"groupInfo"];
+          }
+      }];
+      
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"nav_chat_group"] style:UIBarButtonItemStyleDone target:self action:@selector(onRightBarBtn:)];
   } else if(self.conversation.type == Channel_Type) {
-      [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onChannelInfoUpdated:) name:kChannelInfoUpdated object:self.conversation.target];
+      [[NSNotificationCenter defaultCenter] addObserverForName:kChannelInfoUpdated object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+          if ([ws.conversation.target isEqualToString:note.object]) {
+              ws.targetChannel = note.userInfo[@"channelInfo"];
+          }
+      }];
       
       self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithImage:[UIImage imageNamed:@"nav_chat_channel"] style:UIBarButtonItemStyleDone target:self action:@selector(onRightBarBtn:)];
   }
@@ -138,7 +149,6 @@
     self.orignalDraft = [[WFCCIMService sharedWFCIMService] getConversationInfo:self.conversation].draft;
     
     if (self.conversation.type == Chatroom_Type) {
-        __weak typeof(self) ws = self;
         __block MBProgressHUD *hud = [MBProgressHUD showHUDAddedTo:ws.view animated:YES];
         hud.label.text = @"进入聊天室。。。";
         [hud showAnimated:YES];
@@ -147,6 +157,7 @@
             NSLog(@"join chatroom successs");
             [ws sendChatroomWelcomeMessage];
             [hud hideAnimated:YES];
+            [ws loadMoreMessage:YES];
         } error:^(int error_code) {
             NSLog(@"join chatroom error");
             hud.mode = MBProgressHUDModeText;
@@ -227,7 +238,7 @@
                         if (!messages.count) {
                             weakSelf.hasMoreOld = NO;
                         } else {
-                            [weakSelf appendMessages:messageList newMessage:NO highlightId:0];
+                            [weakSelf appendMessages:messages newMessage:NO highlightId:0];
                         }
                         weakSelf.loadingMore = NO;
                     });
@@ -328,7 +339,9 @@
 
 - (void)setTargetUser:(WFCCUserInfo *)targetUser {
   _targetUser = targetUser;
-    if(targetUser.displayName.length == 0) {
+    if(targetUser.friendAlias.length) {
+        self.title = targetUser.friendAlias;
+    } else if(targetUser.displayName.length == 0) {
         self.title = [NSString stringWithFormat:@"用户<%@>", self.conversation.target];
     } else {
         self.title = targetUser.displayName;
@@ -348,6 +361,21 @@
         self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] init];
         self.navigationItem.backBarButtonItem.title = targetGroup.name;
   }
+    ChatInputBarStatus defaultStatus = ChatInputBarDefaultStatus;
+    if (targetGroup.mute) {
+        if ([targetGroup.owner isEqualToString:[WFCCNetworkService sharedInstance].userId]) {
+            self.chatInputBar.inputBarStatus =  defaultStatus;
+        } else {
+            WFCCGroupMember *gm = [[WFCCIMService sharedWFCIMService] getGroupMember:targetGroup.target memberId:[WFCCNetworkService sharedInstance].userId];
+            if (gm.type == Member_Type_Manager) {
+                self.chatInputBar.inputBarStatus =  defaultStatus;
+            } else {
+                self.chatInputBar.inputBarStatus = ChatInputBarMuteStatus;
+            }
+        }
+    } else {
+        self.chatInputBar.inputBarStatus =  defaultStatus;
+    }
 }
 
 - (void)setTargetChannel:(WFCCChannelInfo *)targetChannel {
@@ -387,19 +415,6 @@
             }
         }
     }
-}
-
-- (void)onUserInfoUpdated:(NSNotification *)notification {
-  self.targetUser = notification.userInfo[@"userInfo"];
-}
-  
-- (void)onGroupInfoUpdated:(NSNotification *)notification {
-  self.targetGroup = notification.userInfo[@"groupInfo"];
-}
-
-- (void)onChannelInfoUpdated:(NSNotification *)notification {
-//    self.targetGroup = notification.userInfo[@"groupInfo"];
-    self.targetChannel = notification.userInfo[@"channelInfo"];
 }
 
 - (void)scrollToBottom:(BOOL)animated {
@@ -698,6 +713,17 @@
         if (!([message.content.class getContentFlags] & 0x1)) {
             continue;
         }
+        BOOL duplcated = NO;
+        for (WFCUMessageModel *model in self.modelList) {
+            if (model.message.messageUid !=0 && model.message.messageUid == message.messageUid) {
+                duplcated = YES;
+                break;
+            }
+        }
+        if (duplcated) {
+            continue;
+        }
+        
         count++;
         
         if (newMessage) {
@@ -728,10 +754,15 @@
     
     BOOL isAtButtom = NO;
     if (newMessage) {
-        CGPoint offset = self.collectionView.contentOffset;
-        CGSize size = self.collectionView.contentSize;
-        CGSize visiableSize = self.collectionView.visibleSize;
-        isAtButtom = (offset.y + visiableSize.height - size.height) > -100;
+        if (@available(iOS 12.0, *)) {
+            CGPoint offset = self.collectionView.contentOffset;
+            CGSize size = self.collectionView.contentSize;
+            CGSize visiableSize = CGSizeZero;
+            visiableSize = self.collectionView.visibleSize;
+            isAtButtom = (offset.y + visiableSize.height - size.height) > -100;
+        } else {
+            isAtButtom = YES;
+        }
     }
     
   [self.collectionView reloadData];
@@ -968,8 +999,22 @@
 }
 
 - (void)didTapMessagePortrait:(WFCUMessageCellBase *)cell withModel:(WFCUMessageModel *)model {
+    if(self.conversation.type == Group_Type) {
+        if (self.targetGroup.privateChat) {
+            if (![self.targetGroup.owner isEqualToString:model.message.fromUser] && ![self.targetGroup.owner isEqualToString:[WFCCNetworkService sharedInstance].userId]) {
+                WFCCGroupMember *gm = [[WFCCIMService sharedWFCIMService] getGroupMember:self.conversation.target memberId:[WFCCNetworkService sharedInstance].userId];
+                if (gm.type != Member_Type_Manager) {
+                    WFCCGroupMember *gm = [[WFCCIMService sharedWFCIMService] getGroupMember:self.conversation.target memberId:model.message.fromUser];
+                    if (gm.type != Member_Type_Manager) {
+                        [self.view makeToast:@"管理员关闭了群组私聊权限" duration:1 position:CSToastPositionCenter];
+                        return;
+                    }
+                }
+            }
+        }
+    }
   WFCUProfileTableViewController *vc = [[WFCUProfileTableViewController alloc] init];
-  vc.userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:model.message.fromUser refresh:NO];
+  vc.userId = model.message.fromUser;
   vc.hidesBottomBarWhenPushed = YES;
   [self.navigationController pushViewController:vc animated:YES];
 }
@@ -1259,6 +1304,7 @@
     UIMenuItem *copyItem = [[UIMenuItem alloc]initWithTitle:@"复制" action:@selector(performCopy:)];
     UIMenuItem *forwardItem = [[UIMenuItem alloc]initWithTitle:@"转发" action:@selector(performForward:)];
     UIMenuItem *recallItem = [[UIMenuItem alloc]initWithTitle:@"撤回" action:@selector(performRecall:)];
+    UIMenuItem *complainItem = [[UIMenuItem alloc]initWithTitle:@"举报" action:@selector(performComplain:)];
     
     CGRect menuPos;
     if ([baseCell isKindOfClass:[WFCUMessageCell class]]) {
@@ -1275,6 +1321,10 @@
     [items addObject:deleteItem];
     if ([msg.content isKindOfClass:[WFCCTextMessageContent class]]) {
         [items addObject:copyItem];
+    }
+    
+    if (baseCell.model.message.direction == MessageDirection_Receive) {
+        [items addObject:complainItem];
     }
     
     if ([msg.content isKindOfClass:[WFCCImageMessageContent class]] ||
@@ -1339,7 +1389,7 @@
 
 -(BOOL)canPerformAction:(SEL)action withSender:(id)sender {
     if(self.cell4Menu) {
-        if (action == @selector(performDelete:) || action == @selector(performCopy:) || action == @selector(performForward:) || action == @selector(performRecall:)) {
+        if (action == @selector(performDelete:) || action == @selector(performCopy:) || action == @selector(performForward:) || action == @selector(performRecall:) || action == @selector(performComplain:)) {
             return YES; //显示自定义的菜单项
         } else {
             return NO;
@@ -1403,6 +1453,16 @@
     }
 }
 
+- (void)performComplain:(UIMenuItem *)sender {
+    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"举报" message:@"如果您发现有违反法律和道德的内容，或者您的合法权益受到侵犯，请截图之后发送给我们。我们会在24小时之内处理。处理办法包括不限于删除内容，对作者进行警告，冻结账号，甚至报警处理。举报请到\"设置->设置->举报\"联系我们！" preferredStyle:UIAlertControllerStyleAlert];
+    
+    UIAlertAction *action = [UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        
+    }];
+    [alertController addAction:action];
+    
+    [self presentViewController:alertController animated:YES completion:nil];
+}
 - (void)onMenuHidden:(id)sender {
     UIMenuController *menu = [UIMenuController sharedMenuController];
     [menu setMenuItems:nil];

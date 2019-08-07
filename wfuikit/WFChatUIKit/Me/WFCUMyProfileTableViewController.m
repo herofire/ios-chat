@@ -212,7 +212,7 @@
 
 - (void)showMyQrCode {
     if (gQrCodeDelegate) {
-        [gQrCodeDelegate showQrCodeViewController:self.navigationController type:QRType_Me target:nil];
+        [gQrCodeDelegate showQrCodeViewController:self.navigationController type:QRType_User target:[WFCCNetworkService sharedInstance].userId];
     }
 }
 #pragma mark - UITableViewDelegate
@@ -221,7 +221,6 @@
     if (indexPath.row == 0 && indexPath.section == 0) {
         WFCUMyPortraitViewController *pvc = [[WFCUMyPortraitViewController alloc] init];
         pvc.userId = [WFCCNetworkService sharedInstance].userId;
-        vc = pvc;
         [self.navigationController pushViewController:pvc animated:YES];
     } else {
         UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];

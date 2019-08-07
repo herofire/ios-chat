@@ -18,12 +18,14 @@
 #import "WFCUCreateGroupViewController.h"
 #import "WFCUProfileTableViewController.h"
 #import "WFCUCreateGroupViewController.h"
+#import "GroupManageTableViewController.h"
 
 #import "MBProgressHUD.h"
 #import "WFCUMyProfileTableViewController.h"
 #import "WFCUConversationSearchTableViewController.h"
 #import "WFCUChannelProfileViewController.h"
 #import "QrCodeHelper.h"
+#import "UIView+Toast.h"
 
 @interface WFCUConversationSettingViewController () <UITableViewDataSource, UITableViewDelegate, UICollectionViewDelegate, UICollectionViewDataSource>
 @property (nonatomic, strong)UICollectionView *memberCollectionView;
@@ -69,7 +71,17 @@
         if (self.conversation.type == Single_Type) {
             memberCollectionCount = 2;
         } else if(self.conversation.type == Group_Type) {
-            memberCollectionCount = [self isGroupManager] ? (int)self.memberList.count + 2 : (int)self.memberList.count + 1;
+            if ([self isGroupManager]) {
+                memberCollectionCount = (int)self.memberList.count + 2;
+            } else if(self.groupInfo.type == GroupType_Restricted) {
+                if (self.groupInfo.joinType == 1 || self.groupInfo.joinType == 0) {
+                    memberCollectionCount = (int)self.memberList.count + 1;
+                } else {
+                    memberCollectionCount = (int)self.memberList.count;
+                }
+            } else {
+                memberCollectionCount = (int)self.memberList.count + 1;
+            }
         } else if(self.conversation.type == Channel_Type) {
             memberCollectionCount = 1;
         }
@@ -130,7 +142,19 @@
     }
     
     [self.view addSubview:self.tableView];
+    
+    if(self.conversation.type == Group_Type) {
+        __weak typeof(self)ws = self;
+        [[NSNotificationCenter defaultCenter] addObserverForName:kGroupMemberUpdated object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+            if ([ws.conversation.target isEqualToString:note.object]) {
+                ws.groupInfo = [[WFCCIMService sharedWFCIMService] getGroupInfo:ws.conversation.target refresh:NO];
+                ws.memberList = [[WFCCIMService sharedWFCIMService] getGroupMembers:ws.conversation.target forceUpdate:NO];
+                [ws.memberCollectionView reloadData];
+            }
+        }];
+    }
 }
+
 
 - (void)onTapChannelPortrait:(id)sender {
     WFCUChannelProfileViewController *pvc = [[WFCUChannelProfileViewController alloc] init];
@@ -344,7 +368,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (self.conversation.type == Group_Type) {
         if (section == 0) {
-            if ([self isGroupManager]) {
+            if ([self isGroupManager] && self.groupInfo.type == GroupType_Restricted) {
                 return 4; //群名称，群头像，群二维码，群管理，
             } else {
                 return 3; //群名称，群头像，群二维码
@@ -522,6 +546,10 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     __weak typeof(self)weakSelf = self;
   if ([self isGroupNameCell:indexPath]) {
+      if (self.groupInfo.type == GroupType_Restricted && ![self isGroupManager]) {
+          [self.view makeToast:@"只有管理员才可以修改群名称" duration:1 position:CSToastPositionCenter];
+          return;
+      }
     WFCUGeneralModifyViewController *gmvc = [[WFCUGeneralModifyViewController alloc] init];
     gmvc.defaultValue = self.groupInfo.name;
     gmvc.titleText = @"修改群名称";
@@ -536,6 +564,10 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:gmvc];
     [self.navigationController presentViewController:nav animated:YES completion:nil];
   } else if ([self isGroupPortraitCell:indexPath]) {
+      if (self.groupInfo.type == GroupType_Restricted && ![self isGroupManager]) {
+          [self.view makeToast:@"只有管理员才可以修改群头像" duration:1 position:CSToastPositionCenter];
+          return;
+      }
     WFCUCreateGroupViewController *vc = [[WFCUCreateGroupViewController alloc] init];
     vc.isModifyPortrait = YES;
     vc.groupId = self.groupInfo.target;
@@ -546,7 +578,9 @@
     
     [self.navigationController pushViewController:vc animated:YES];
   } else if ([self isGroupManageCell:indexPath]) {
-    
+      GroupManageTableViewController *gmvc = [[GroupManageTableViewController alloc] init];
+      gmvc.groupInfo = self.groupInfo;
+      [self.navigationController pushViewController:gmvc animated:YES];
   } else if ([self isSearchMessageCell:indexPath]) {
       WFCUConversationSearchTableViewController *mvc = [[WFCUConversationSearchTableViewController alloc] init];
       mvc.conversation = self.conversation;
@@ -614,6 +648,9 @@
         if([self isGroupManager]) {
             return self.memberList.count + 2;
         } else {
+            if (self.groupInfo.type == GroupType_Restricted && self.groupInfo.joinType != 1 && self.groupInfo.joinType != 0) {
+                return self.memberList.count;
+            }
             return self.memberList.count + 1;
         }
     } else if(self.conversation.type == Single_Type) {
@@ -657,8 +694,9 @@
             [disabledUser addObject:member.memberId];
         }
         pvc.selectResult = ^(NSArray<NSString *> *contacts) {
-            [[WFCCIMService sharedWFCIMService] addMembers:contacts toGroup:self.conversation.target notifyLines:@[@(0)] notifyContent:nil success:^{
+            [[WFCCIMService sharedWFCIMService] addMembers:contacts toGroup:ws.conversation.target notifyLines:@[@(0)] notifyContent:nil success:^{
               [[WFCCIMService sharedWFCIMService] getGroupMembers:ws.conversation.target forceUpdate:YES];
+                
             } error:^(int error_code) {
               
             }];
@@ -672,10 +710,27 @@
             if(![vc.memberIds containsObject:self.conversation.target]) {
               [vc.memberIds insertObject:self.conversation.target atIndex:0];
             }
+            
+            if(![vc.memberIds containsObject:[WFCCNetworkService sharedInstance].userId]) {
+                [vc.memberIds insertObject:[WFCCNetworkService sharedInstance].userId atIndex:0];
+            }
+            
             vc.hidesBottomBarWhenPushed = YES;
             UINavigationController *nav = self.navigationController;
             [self.navigationController popToRootViewControllerAnimated:NO];
             [nav pushViewController:vc animated:YES];
+            
+            vc.onSuccess = ^(NSString *groupId) {
+                WFCUMessageListViewController *mvc = [[WFCUMessageListViewController alloc] init];
+                mvc.conversation = [[WFCCConversation alloc] init];
+                mvc.conversation.type = Group_Type;
+                mvc.conversation.target = groupId;
+                mvc.conversation.line = 0;
+                
+                mvc.hidesBottomBarWhenPushed = YES;
+                [nav pushViewController:mvc animated:YES];
+            };
+            
         };
         pvc.disableUsersSelected = YES;
       }
@@ -707,11 +762,18 @@
           }];
       };
         NSMutableArray *candidateUsers = [[NSMutableArray alloc] init];
+        NSMutableArray *disableUsers = [[NSMutableArray alloc] init];
+        BOOL isOwner = [self isGroupOwner];
+        
         for (WFCCGroupMember *member in self.memberList) {
             [candidateUsers addObject:member.memberId];
+            if (!isOwner && (member.type == Member_Type_Manager || [self.groupInfo.owner isEqualToString:member.memberId])) {
+                [disableUsers addObject:member.memberId];
+            }
         }
+        [disableUsers addObject:[WFCCNetworkService sharedInstance].userId];
         pvc.candidateUsers = candidateUsers;
-        pvc.disableUsers = @[[WFCCNetworkService sharedInstance].userId];
+        pvc.disableUsers = [disableUsers copy];
         UINavigationController *navi = [[UINavigationController alloc] initWithRootViewController:pvc];
         [self.navigationController presentViewController:navi animated:YES completion:nil];
     } else {
@@ -728,13 +790,14 @@
 //            [self.navigationController pushViewController:vc animated:YES];
 //        } else {
             WFCUProfileTableViewController *vc = [[WFCUProfileTableViewController alloc] init];
-            vc.userInfo = [[WFCCIMService sharedWFCIMService] getUserInfo:userId refresh:NO];
-            if (vc.userInfo == nil) {
-                return;
-            }
+            vc.userId = userId;
             vc.hidesBottomBarWhenPushed = YES;
             [self.navigationController pushViewController:vc animated:YES];
 //        }
     }
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 @end

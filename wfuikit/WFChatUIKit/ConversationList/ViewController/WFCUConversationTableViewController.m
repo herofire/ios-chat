@@ -40,6 +40,8 @@
 @property (nonatomic, strong) UIView *searchViewContainer;
 
 @property (nonatomic, assign) BOOL firstAppear;
+
+@property (nonatomic, strong) UIView *pcSessionView;
 @end
 
 @implementation WFCUConversationTableViewController
@@ -62,7 +64,7 @@
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.tableFooterView = [[UIView alloc] initWithFrame:CGRectZero];
-    
+    self.tableView.separatorStyle = UITableViewCellSeparatorStyleNone;
     
     if (@available(iOS 11.0, *)) {
         self.navigationItem.searchController = _searchController;
@@ -70,6 +72,8 @@
         self.tableView.tableHeaderView = _searchController.searchBar;
     }
     self.definesPresentationContext = YES;
+    
+    [self updatePcSession];
 }
 
 - (void)onUserInfoUpdated:(NSNotification *)notification {
@@ -153,7 +157,7 @@
     [KxMenu showMenuInView:self.view
                   fromRect:CGRectMake(self.view.bounds.size.width - 56, kStatusBarAndNavigationBarHeight + searchExtra, 48, 5)
                  menuItems:@[
-                             [KxMenuItem menuItem:@"创建聊天"
+                             [KxMenuItem menuItem:@"发起群聊"
                                             image:[UIImage imageNamed:@"menu_start_chat"]
                                            target:self
                                            action:@selector(startChatAction:)],
@@ -307,6 +311,7 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self refreshList];
         [self refreshLeftButton];
+        [self updatePcSession];
     });
 }
 
@@ -324,7 +329,7 @@
 }
 
 - (void)refreshList {
-  self.conversations = [[[WFCCIMService sharedWFCIMService] getConversationInfos:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0), @(1)]] mutableCopy];
+  self.conversations = [[[WFCCIMService sharedWFCIMService] getConversationInfos:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0)]] mutableCopy];
     [self updateBadgeNumber];
   [self.tableView reloadData];
 }
@@ -337,6 +342,20 @@
         }
     }
     [self.tabBarController.tabBar showBadgeOnItemIndex:0 badgeValue:count];
+}
+
+- (void)updatePcSession {
+    NSString *pcOnline = [[WFCCIMService sharedWFCIMService] getUserSetting:UserSettingScope_PC_Online key:@""];
+    
+    if (@available(iOS 11.0, *)) {
+        if ([pcOnline isEqualToString:@"1"]) {
+            self.tableView.tableHeaderView = self.pcSessionView;
+        } else {
+            self.tableView.tableHeaderView = nil;
+        }
+    } else {
+    }
+    
 }
 
 - (void)didReceiveMemoryWarning {
@@ -375,7 +394,7 @@
 }
 - (void)refreshLeftButton {
     dispatch_async(dispatch_get_main_queue(), ^{
-        WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0), @(1)]];
+        WFCCUnreadCount *unreadCount = [[WFCCIMService sharedWFCIMService] getUnreadCount:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0)]];
         NSUInteger count = unreadCount.unread;
         
         NSString *title = nil;
@@ -392,6 +411,20 @@
         
         self.navigationItem.backBarButtonItem = item;
     });
+}
+
+- (UIView *)pcSessionView {
+    if (!_pcSessionView) {
+        _pcSessionView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 40)];
+        [_pcSessionView setBackgroundColor:[UIColor grayColor]];
+        UIImageView *iv = [[UIImageView alloc] initWithFrame:CGRectMake(20, 4, 32, 32)];
+        iv.image = [UIImage imageNamed:@"pc_session"];
+        [_pcSessionView addSubview:iv];
+        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(68, 10, 100, 20)];
+        label.text = @"PC已登录";
+        [_pcSessionView addSubview:label];
+    }
+    return _pcSessionView;
 }
 
 #pragma mark - Table view data source
@@ -496,7 +529,19 @@
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
-  return 68;
+  return 72;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath
+{
+    if ([cell respondsToSelector:@selector(setSeparatorInset:)])
+    {
+        [cell setSeparatorInset:UIEdgeInsetsMake(0, 76, 0, 0)];
+    }
+    if ([cell respondsToSelector:@selector(setLayoutMargins:)])
+    {
+        [cell setLayoutMargins:UIEdgeInsetsMake(0, 76, 0, 0)];
+    }
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
@@ -695,7 +740,7 @@
 -(void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *searchString = [self.searchController.searchBar text];
     if (searchString.length) {
-        self.searchConversationList = [[WFCCIMService sharedWFCIMService] searchConversation:searchString inConversation:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0), @(1)]];
+        self.searchConversationList = [[WFCCIMService sharedWFCIMService] searchConversation:searchString inConversation:@[@(Single_Type), @(Group_Type), @(Channel_Type)] lines:@[@(0)]];
         self.searchFriendList = [[WFCCIMService sharedWFCIMService] searchFriends:searchString];
         self.searchGroupList = [[WFCCIMService sharedWFCIMService] searchGroups:searchString];
     } else {
